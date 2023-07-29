@@ -12,8 +12,9 @@ import (
 	"go.uber.org/zap"
 )
 
-func GetRoutes(r *chi.Mux, db repository.Storage, log *zap.SugaredLogger) {
+func NewRoutes(db repository.Storage, log *zap.SugaredLogger) *chi.Mux {
 	handler := handlers.New(db, log)
+	r := chi.NewRouter()
 	r.Route("/api/user/", func(r chi.Router) {
 		auth.AuthRouters(r, handler)
 
@@ -24,4 +25,6 @@ func GetRoutes(r *chi.Mux, db repository.Storage, log *zap.SugaredLogger) {
 			withdrawals.Withdrawals(router, handler)
 		})
 	})
+
+	return r
 }

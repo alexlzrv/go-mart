@@ -1,33 +1,26 @@
 package apigomart
 
 import (
+	"context"
 	"net/http"
-	"sync"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/repository/pgrepo"
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/rest/routers"
 	"github.com/alexlzrv/go-mart/internal/config"
 	"github.com/alexlzrv/go-mart/internal/logger"
+	"github.com/alexlzrv/go-mart/internal/loyalty-accruals"
+	"github.com/alexlzrv/go-mart/internal/runner"
 	"github.com/alexlzrv/go-mart/sql"
-	"github.com/go-chi/chi/v5"
 )
 
 func Run() {
+	ctx := context.Background()
 	cfg := config.NewConfig()
 
 	log, err := logger.LogInitializer(cfg.LogLevel)
 	if err != nil {
 		return
 	}
-
-	log.Infof("Run server at address %s", cfg.ServerAddress)
-	var (
-		r   = chi.NewRouter()
-		srv = &http.Server{
-			Addr:    cfg.ServerAddress,
-			Handler: r,
-		}
-	)
 
 	pg, err := sql.NewPostgresStorage(cfg.DSN, log)
 	if err != nil {
@@ -46,29 +39,16 @@ func Run() {
 
 	repo := pgrepo.NewRepository(pg, log)
 
-	routers.GetRoutes(r, repo, log)
-
-	log.Info("Server is running...")
-	if err = srv.ListenAndServe(); err != nil {
-		log.Fatalf("Error with server running: %v", err)
+	server := &http.Server{
+		Addr:    cfg.ServerAddress,
+		Handler: routers.NewRoutes(repo, log),
 	}
 
-	wg := &sync.WaitGroup{}
+	loyaltyAccrual := loyalty.New(cfg.AccrualAddress, repo, log)
 
-	//wg.Add(1)
-	//go func() {
-	//	defer wg.Done()
-	//	log.Info("Server is running...")
-	//	if err = srv.ListenAndServe(); err != nil {
-	//		log.Fatalf("Error with server running: %v", err)
-	//	}
-	//
-	//}()
-	//
-	//if err = srv.Shutdown(context.Background()); err != nil {
-	//	log.Errorf("server shutdown %v", err)
-	//	return
-	//}
-
-	wg.Wait()
+	r := runner.New(server, loyaltyAccrual, log)
+	if err = r.Run(ctx); err != nil {
+		log.Errorf("error while running runner: %s", err)
+		return
+	}
 }

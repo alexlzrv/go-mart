@@ -72,13 +72,13 @@ func (repo *PostgresRepo) Login(ctx context.Context, user *entities.User) error 
 	return nil
 }
 
-func (repo *PostgresRepo) GetUserOrders(userID int64) ([]byte, error) {
+func (repo *PostgresRepo) GetUserOrders(ctx context.Context, userID int64) ([]byte, error) {
 	query := `SELECT order_num, status, accrual, uploaded_at
 			  FROM orders 
 			  WHERE user_id = $1
 			  ORDER BY uploaded_at ASC`
 
-	rows, err := repo.db.Query(query, userID)
+	rows, err := repo.db.QueryContext(ctx, query, userID)
 	if err != nil {
 		repo.log.Errorf("getUserOrders, error with get row in query %s", err)
 		return nil, err
@@ -177,6 +177,71 @@ func (repo *PostgresRepo) LoadOrder(ctx context.Context, order *entities.Order) 
 	}
 
 	return tx.Commit()
+}
+
+func (repo *PostgresRepo) UpdateOrder(ctx context.Context, order *entities.Order) error {
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func(tx *sql.Tx) {
+		err = tx.Rollback()
+		if err != nil {
+			return
+		}
+	}(tx)
+
+	query := `UPDATE orders
+		SET status = $1, accrual = $2
+		WHERE order_num = $3`
+
+	_, err = tx.ExecContext(ctx, query, order.Status, order.Accrual, order.Number)
+	if err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func (repo *PostgresRepo) GetAllOrder(ctx context.Context) ([]entities.Order, error) {
+	query := `SELECT user_id, order_num, status, uploaded_at
+		FROM orders 
+		WHERE status = 'NEW' OR status = 'PROCESSING'
+		ORDER BY uploaded_at ASC`
+
+	rows, err := repo.db.QueryContext(ctx, query)
+	if err != nil {
+		repo.log.Errorf("getAllOrder, error with query %s", err)
+		return nil, err
+	}
+
+	defer func(rows *sql.Rows) {
+		err = rows.Close()
+		if err != nil {
+			return
+		}
+	}(rows)
+
+	orders := make([]entities.Order, 0)
+
+	for rows.Next() {
+		order := entities.Order{}
+
+		err = rows.Scan(&order.UserID, &order.Number, &order.Status, &order.UploadedAt)
+		if err != nil {
+			repo.log.Errorf("getAllOrder, error with scan row %s", err)
+			return nil, err
+		}
+
+		orders = append(orders, order)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return orders, nil
 }
 
 func (repo *PostgresRepo) GetBalanceInfo(login string) ([]byte, error) {
