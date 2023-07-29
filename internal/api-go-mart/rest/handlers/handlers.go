@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	requestTimeout = 15 * time.Second
+	requestTimeout = 5 * time.Second
 )
 
 type Handler struct {
