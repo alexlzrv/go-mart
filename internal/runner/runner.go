@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/alexlzrv/go-mart/internal/config"
 	"github.com/alexlzrv/go-mart/internal/loyalty-accruals"
 	"go.uber.org/zap"
 )
@@ -15,13 +16,15 @@ type Runner struct {
 	log            *zap.SugaredLogger
 	server         *http.Server
 	loyaltyAccrual *loyalty.Accrual
+	cfq            *config.Config
 }
 
-func New(server *http.Server, loyaltyAccrual *loyalty.Accrual, log *zap.SugaredLogger) *Runner {
+func New(server *http.Server, loyaltyAccrual *loyalty.Accrual, log *zap.SugaredLogger, cfg *config.Config) *Runner {
 	return &Runner{
 		server:         server,
 		log:            log,
 		loyaltyAccrual: loyaltyAccrual,
+		cfq:            cfg,
 	}
 }
 
@@ -36,9 +39,12 @@ func (r *Runner) Run(ctx context.Context) error {
 		}
 	}()
 
-	go r.loyaltyAccrual.OrderWorker(ctx)
+	if r.cfq.AccrualAddress != "" {
+		go r.loyaltyAccrual.OrderWorker(ctx)
+	}
 
 	r.log.Infof("Starting server on addr: %s", r.server.Addr)
+	r.log.Infof("Starting accrual server on addr: %s", r.cfq.AccrualAddress)
 	if err := r.server.ListenAndServe(); err != nil {
 		r.log.Errorf("error while running server: %s", err)
 		return err

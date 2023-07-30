@@ -58,6 +58,20 @@ func (a *Accrual) updateOrdersInfo() error {
 			a.log.Errorf("error with update order info %s", err)
 			return err
 		}
+
+		if order.Status == entities.OrderStatusProcessed {
+			balanceChange := entities.BalanceChange{
+				UserID: order.UserID,
+				Order:  order.Number,
+				Amount: order.Accrual,
+			}
+
+			err := a.db.GetWithdrawals(requestContext, &balanceChange)
+			if err != nil {
+				a.log.Errorf("getWithdrawals, error %s", err)
+				return err
+			}
+		}
 	}
 
 	return nil

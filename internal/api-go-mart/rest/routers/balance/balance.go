@@ -7,7 +7,7 @@ import (
 
 func Balance(r chi.Router, handler *handlers.Handler) {
 	r.Group(func(router chi.Router) {
-		router.Post("/balance/withdraw", handler.BalanceWithdrawals)
+		router.Post("/balance/withdraw", handler.GetWithdrawals)
 		router.Get("/balance", handler.GetBalance)
 	})
 }

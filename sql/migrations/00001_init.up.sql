@@ -21,12 +21,13 @@ CREATE TABLE IF NOT EXISTS orders(
 CREATE TABLE IF NOT EXISTS balance(
                         id BIGINT GENERATED ALWAYS AS IDENTITY,
                         user_id BIGINT,
-                        balance DOUBLE PRECISION,
+                        balance DOUBLE PRECISION NOT NULL CHECK (balance >= 0),
                         FOREIGN KEY(user_id) REFERENCES users(id)
 );
 
 CREATE TABLE IF NOT EXISTS withdraw(
                         user_id BIGINT NOT NULL PRIMARY KEY REFERENCES users(id),
+                        order_num TEXT NOT NULL,
                         amount DOUBLE PRECISION,
                         processed_at TIMESTAMP WITH TIME ZONE NOT NULL
 );

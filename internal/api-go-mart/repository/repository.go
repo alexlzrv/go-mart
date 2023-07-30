@@ -15,7 +15,7 @@ type Storage interface {
 	UpdateOrder(ctx context.Context, order *entities.Order) error
 	GetAllOrder(ctx context.Context) ([]entities.Order, error)
 
-	GetBalanceInfo(login string) ([]byte, error)
-	Withdraw(login string, orderID string, sum float64) error
-	GetWithdrawals(login string) ([]byte, error)
+	GetBalanceInfo(ctx context.Context, userID int64) ([]byte, error)
+	Withdraw(ctx context.Context, userID int64) ([]byte, error)
+	GetWithdrawals(ctx context.Context, change *entities.BalanceChange) error
 }
