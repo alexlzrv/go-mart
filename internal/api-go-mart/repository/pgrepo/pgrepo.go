@@ -8,6 +8,8 @@ import (
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
 	postgres "github.com/alexlzrv/go-mart/sql"
+	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -50,6 +52,14 @@ func (repo *PostgresRepo) Register(ctx context.Context, user *entities.User) err
 	err = tx.QueryRowContext(ctx, query, user.Login, user.CryptPassword).Scan(&id)
 	if err != nil {
 		repo.log.Errorf("register, error with scan row %s", err)
+		return err
+	}
+
+	query = `INSERT INTO balance(user_id, balance) 
+				VALUES($1, 0)`
+
+	_, err = tx.ExecContext(ctx, query, id)
+	if err != nil {
 		return err
 	}
 
@@ -114,7 +124,7 @@ func (repo *PostgresRepo) GetUserOrders(ctx context.Context, userID int64) ([]by
 	}
 
 	if len(orders) == 0 {
-		return nil, errors.New("getUserOrders, no data")
+		return nil, entities.ErrNoData
 	}
 
 	result, err := json.Marshal(orders)
@@ -139,44 +149,52 @@ func (repo *PostgresRepo) LoadOrder(ctx context.Context, order *entities.Order) 
 		}
 	}(tx)
 
-	var (
-		accrual sql.NullFloat64
-		userID  int64
-	)
-
 	query := `INSERT INTO orders(user_id, order_num, status, uploaded_at)
 				VALUES($1, $2, $3, now())`
 
-	oldOrder := `SELECT user_id, order_num, status, accrual, uploaded_at
-			 	 FROM orders 
-			 	 WHERE order_num = $1`
-
-	err = repo.db.
-		QueryRowContext(ctx, oldOrder, order.Number).
-		Scan(&userID, &order.Number, &order.Status, &accrual, &order.UploadedAt)
-
-	switch err {
-	case nil:
-		if order.UserID == userID {
-			repo.log.Infof("loadOrder, order %s already added, userID %d", order.Number, userID)
-			return entities.ErrOrderAlreadyAdded
-		}
-		repo.log.Infof("loadOrder, order %s already added, older userID %d userID %d", order.Number, userID, order.UserID)
-		return entities.ErrOrderAddedByOther
-
-	case sql.ErrNoRows:
-		repo.log.Infof("loadOrder, order %s added, userID %d", order.Number, order.UserID)
-		_, err = tx.ExecContext(ctx, query, order.UserID, order.Number, order.Status)
-		if err != nil {
-			repo.log.Errorf("loadOrder, error loading order %d - %s", order.UserID, err)
+	_, err = tx.ExecContext(ctx, query, order.UserID, order.Number, order.Status)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code != pgerrcode.UniqueViolation {
 			return err
 		}
 
-	default:
-		return err
+		existOrder, err := repo.CheckOrder(ctx, order.Number)
+		if err != nil {
+			repo.log.Errorf("checkOrder, error %s", err)
+			return err
+		}
+
+		if order.UserID == existOrder.UserID {
+			return entities.ErrOrderAlreadyAdded
+		}
+
+		return entities.ErrOrderAddedByOther
 	}
 
 	return tx.Commit()
+}
+
+func (repo *PostgresRepo) CheckOrder(ctx context.Context, number string) (*entities.Order, error) {
+	query := `SELECT user_id, order_num, status, accrual, uploaded_at
+			 	 FROM orders 
+			 	 WHERE order_num = $1`
+
+	var (
+		accrual sql.NullFloat64
+		order   = &entities.Order{}
+	)
+
+	err := repo.db.QueryRowContext(ctx, query, number).Scan(
+		&order.UserID, &order.Number, &order.Status, &accrual, &order.UploadedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	order.Accrual = accrual.Float64
+
+	return order, nil
 }
 
 func (repo *PostgresRepo) UpdateOrder(ctx context.Context, order *entities.Order) error {
@@ -244,16 +262,113 @@ func (repo *PostgresRepo) GetAllOrder(ctx context.Context) ([]entities.Order, er
 	return orders, nil
 }
 
-func (repo *PostgresRepo) GetBalanceInfo(login string) ([]byte, error) {
-	var result []byte
+func (repo *PostgresRepo) GetBalanceInfo(ctx context.Context, userID int64) ([]byte, error) {
+	query := `SELECT b.balance, COALESCE(w.amount, 0)
+				FROM balance b
+				LEFT JOIN (SELECT user_id, SUM(amount) AS amount
+				    		FROM withdraw
+				    		GROUP BY user_id) w ON b.user_id = w.user_id
+				WHERE b.user_id = $1`
+
+	balance := entities.Balance{UserID: userID}
+
+	err := repo.db.QueryRowContext(ctx, query, userID).Scan(&balance.Current, &balance.Withdrawn)
+	if err != nil {
+		repo.log.Errorf("getBalanceInfo, error with %s", err)
+		return nil, err
+	}
+
+	result, err := json.Marshal(balance)
+	if err != nil {
+		repo.log.Errorf("getBalanceInfo, error with marshal %s", err)
+		return nil, err
+	}
+
 	return result, nil
 }
 
-func (repo *PostgresRepo) Withdraw(login string, orderID string, sum float64) error {
-	return nil
+func (repo *PostgresRepo) Withdraw(ctx context.Context, userID int64) ([]byte, error) {
+	query := `SELECT order_num, amount, processed_at
+				FROM withdraw
+				WHERE user_id = $1
+				ORDER BY processed_at ASC`
+
+	rows, err := repo.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func(rows *sql.Rows) {
+		err = rows.Close()
+		if err != nil {
+			return
+		}
+	}(rows)
+
+	withdrawals := make([]entities.BalanceChange, 0)
+
+	for rows.Next() {
+		withdrawal := entities.BalanceChange{
+			UserID: userID,
+		}
+
+		err = rows.Scan(&withdrawal.Order, &withdrawal.Amount, &withdrawal.ProcessedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		withdrawals = append(withdrawals, withdrawal)
+	}
+
+	if err = rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result, err := json.Marshal(withdrawals)
+	if err != nil {
+		repo.log.Errorf("withdraw, error with marshal %s", err)
+		return nil, err
+	}
+
+	return result, nil
 }
 
-func (repo *PostgresRepo) GetWithdrawals(login string) ([]byte, error) {
-	var result []byte
-	return result, nil
+func (repo *PostgresRepo) GetWithdrawals(ctx context.Context, change *entities.BalanceChange) error {
+	queryBalance := `UPDATE balance
+				SET balance = balance - $1
+				WHERE user_id = $2`
+
+	queryWithdraw := `INSERT INTO withdraw(user_id, order_num, amount, processed_at)
+						VALUES ($1, $2, $3, now())`
+
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func(tx *sql.Tx) {
+		err = tx.Rollback()
+		if err != nil {
+			return
+		}
+	}(tx)
+
+	_, err = tx.ExecContext(ctx, queryBalance, change.Amount, change.UserID)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.CheckViolation {
+			return entities.ErrNegativeBalance
+		}
+
+		repo.log.Errorf("getWithdrawals, error %s", err)
+		return err
+	}
+
+	_, err = tx.ExecContext(ctx, queryWithdraw, change.UserID, change.Order, change.Amount)
+	if err != nil {
+		repo.log.Errorf("getWithdrawals, error exec %s", err)
+		return err
+	}
+
+	return tx.Commit()
 }

@@ -46,7 +46,7 @@ func Run() {
 
 	loyaltyAccrual := loyalty.New(cfg.AccrualAddress, repo, log)
 
-	r := runner.New(server, loyaltyAccrual, log)
+	r := runner.New(server, loyaltyAccrual, log, cfg)
 	if err = r.Run(ctx); err != nil {
 		log.Errorf("error while running runner: %s", err)
 		return

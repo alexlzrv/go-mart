@@ -7,13 +7,9 @@ import (
 	"net/http"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
-	j "github.com/alexlzrv/go-mart/internal/utils/jwt"
 )
 
 func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		h.log.Errorf("error read body %s", err)
@@ -21,14 +17,10 @@ func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	authHeader := r.Header.Get("Authorization")
+	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer requestCancel()
 
-	userID, err := j.ParseToken(authHeader)
-	if err != nil {
-		h.log.Errorf("error with parse token %s", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
+	userID := h.getUserIDFromBody(w, r)
 
 	order := entities.NewOrder(userID, string(body))
 
@@ -48,6 +40,9 @@ func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusConflict)
 			return
 		}
+		h.log.Errorf("error %s", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 	w.Header().Set("content-type", "text/plain")
 	w.WriteHeader(http.StatusAccepted)
@@ -57,17 +52,16 @@ func (h *Handler) GetOrders(w http.ResponseWriter, r *http.Request) {
 	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
 	defer requestCancel()
 
-	authHeader := r.Header.Get("Authorization")
-
-	userID, err := j.ParseToken(authHeader)
-	if err != nil {
-		h.log.Errorf("error with parse token %s", err)
-		w.WriteHeader(http.StatusBadRequest)
-		return
-	}
+	userID := h.getUserIDFromBody(w, r)
 
 	orders, err := h.db.GetUserOrders(requestContext, userID)
 	if err != nil {
+		if errors.Is(err, entities.ErrNoData) {
+			h.log.Errorf("getOrders, no data")
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
 		h.log.Errorf("getOrders, error %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return

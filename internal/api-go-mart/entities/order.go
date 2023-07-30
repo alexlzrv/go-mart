@@ -21,6 +21,7 @@ var (
 	ErrInvalidOrderNumber = errors.New("invalid order number")
 	ErrOrderAlreadyAdded  = errors.New("order has already been added")
 	ErrOrderAddedByOther  = errors.New("order has already been added by another user")
+	ErrNoData             = errors.New("no data")
 )
 
 type Order struct {
