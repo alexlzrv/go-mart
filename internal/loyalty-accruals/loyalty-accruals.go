@@ -1,19 +1,19 @@
 package loyalty
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"time"
 
-	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/repository"
+	"github.com/go-resty/resty/v2"
 	"go.uber.org/zap"
 )
 
-type Accrual struct {
+type Accrual interface {
+	GetActualInfo(order string) (*AccrualResponse, error)
+}
+
+type AccrualOrder struct {
 	address string
 	db      repository.Storage
 	log     *zap.SugaredLogger
@@ -25,90 +25,24 @@ type AccrualResponse struct {
 	Accrual float64 `json:"accrual"`
 }
 
-func New(address string, db repository.Storage, log *zap.SugaredLogger) *Accrual {
-	return &Accrual{
+func NewAccrual(address string, db repository.Storage, log *zap.SugaredLogger) *AccrualOrder {
+	return &AccrualOrder{
 		address: address,
 		db:      db,
 		log:     log,
 	}
 }
 
-func (a *Accrual) updateOrdersInfo() error {
-	requestContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	client := http.Client{}
-	allOrder, err := a.db.GetAllOrder(requestContext)
+func (a *AccrualOrder) GetActualInfo(order string) (*AccrualResponse, error) {
+	orderFromSystem, err := resty.New().SetRetryCount(5).R().Get(fmt.Sprintf("%s/api/orders/%s", a.address, order))
 	if err != nil {
-		a.log.Errorf("error with get all orders %s", err)
-		return err
-	}
-
-	for _, order := range allOrder {
-		accrualOrder, err := a.sendOrder(requestContext, &client, order.Number)
-		if err != nil {
-			a.log.Errorf("sendOrder, error %s", err)
-			return err
-		}
-
-		order.Status = entities.AccrualToOrderStatus(accrualOrder.Order)
-		order.Accrual = accrualOrder.Accrual
-
-		if err = a.db.UpdateOrder(requestContext, &order); err != nil {
-			a.log.Errorf("error with update order info %s", err)
-			return err
-		}
-
-		if order.Status == entities.OrderStatusProcessed {
-			balanceChange := entities.BalanceChange{
-				UserID: order.UserID,
-				Order:  order.Number,
-				Amount: order.Accrual,
-			}
-
-			err := a.db.GetWithdrawals(requestContext, &balanceChange)
-			if err != nil {
-				a.log.Errorf("getWithdrawals, error %s", err)
-				return err
-			}
-		}
-	}
-
-	return nil
-}
-
-func (a *Accrual) sendOrder(ctx context.Context, client *http.Client, order string) (*AccrualResponse, error) {
-	url := fmt.Sprintf("%s/api/orders/%s", a.address, order)
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
+		a.log.Errorf("error while requesting for order %s: %s", order, err)
 		return nil, err
 	}
-
-	resp, err := client.Do(req)
-	if err != nil {
+	var info AccrualResponse
+	if err = json.Unmarshal(orderFromSystem.Body(), &info); err != nil {
+		a.log.Errorf("error while unmarshalling order body: %s", err)
 		return nil, err
 	}
-
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s", resp.Status)
-	}
-
-	accrualOrder := AccrualResponse{
-		Accrual: 0,
-	}
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
-	}
-
-	err = json.Unmarshal(body, &accrualOrder)
-	if err != nil {
-		return nil, err
-	}
-
-	return &accrualOrder, nil
+	return &info, nil
 }

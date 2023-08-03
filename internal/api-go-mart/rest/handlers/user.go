@@ -1,19 +1,15 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
-	"github.com/alexlzrv/go-mart/internal/utils/jwt"
+	"github.com/alexlzrv/go-mart/internal/utils"
 )
 
 func (h *Handler) Registration(w http.ResponseWriter, r *http.Request) {
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	var user entities.User
 
 	body, err := io.ReadAll(r.Body)
@@ -30,34 +26,25 @@ func (h *Handler) Registration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = h.db.Register(requestContext, &user); err != nil {
+	if err = h.db.Register(r.Context(), &user); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		h.log.Errorf("error with register user: %s", err)
 		return
 	}
 
-	if err = h.db.Login(requestContext, &user); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		h.log.Errorf("error with login user after registration: %s", err)
-		return
-	}
-
-	token, err := jwt.GenerateToken(user.ID)
+	token, err := utils.GenerateToken(user.ID, h.key)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		h.log.Errorf("registration, error with generate token: %s", err)
 		return
 	}
 
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-type", "application/json")
 	w.Header().Add("Authorization", token)
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	var user entities.User
 
 	body, err := io.ReadAll(r.Body)
@@ -74,20 +61,20 @@ func (h *Handler) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err = h.db.Login(requestContext, &user); err != nil {
+	if err = h.db.Login(&user); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		h.log.Errorf("error with login user: %s", err)
 		return
 	}
 
-	token, err := jwt.GenerateToken(user.ID)
+	token, err := utils.GenerateToken(user.ID, h.key)
 	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		h.log.Errorf("login, error with generate token: %s", err)
 		return
 	}
 
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-type", "application/json")
 	w.Header().Add("Authorization", token)
 	w.WriteHeader(http.StatusOK)
 }

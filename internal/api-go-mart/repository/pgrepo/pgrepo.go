@@ -17,10 +17,14 @@ import (
 type PostgresRepo struct {
 	db  *postgres.Postgres
 	log *zap.SugaredLogger
+	ctx *context.Context
 }
 
 func NewRepository(db *postgres.Postgres, log *zap.SugaredLogger) *PostgresRepo {
-	return &PostgresRepo{db: db, log: log}
+	return &PostgresRepo{
+		db:  db,
+		log: log,
+	}
 }
 
 func (repo *PostgresRepo) Register(ctx context.Context, user *entities.User) error {
@@ -68,12 +72,12 @@ func (repo *PostgresRepo) Register(ctx context.Context, user *entities.User) err
 	return tx.Commit()
 }
 
-func (repo *PostgresRepo) Login(ctx context.Context, user *entities.User) error {
+func (repo *PostgresRepo) Login(user *entities.User) error {
 	query := `SELECT id, password
 				   FROM users
 				   WHERE login = $1`
 
-	err := repo.db.QueryRowContext(ctx, query, user.Login).Scan(&user.ID, &user.CryptPassword)
+	err := repo.db.QueryRow(query, user.Login).Scan(&user.ID, &user.CryptPassword)
 	if !errors.Is(err, nil) && !errors.Is(err, sql.ErrNoRows) {
 		repo.log.Errorf("login, error with scan row %s", err)
 		return err
@@ -82,13 +86,13 @@ func (repo *PostgresRepo) Login(ctx context.Context, user *entities.User) error 
 	return nil
 }
 
-func (repo *PostgresRepo) GetUserOrders(ctx context.Context, userID int64) ([]byte, error) {
+func (repo *PostgresRepo) GetUserOrders(userID int64) ([]byte, error) {
 	query := `SELECT order_num, status, accrual, uploaded_at
 			  FROM orders 
 			  WHERE user_id = $1
 			  ORDER BY uploaded_at ASC`
 
-	rows, err := repo.db.QueryContext(ctx, query, userID)
+	rows, err := repo.db.Query(query, userID)
 	if err != nil {
 		repo.log.Errorf("getUserOrders, error with get row in query %s", err)
 		return nil, err
@@ -136,30 +140,18 @@ func (repo *PostgresRepo) GetUserOrders(ctx context.Context, userID int64) ([]by
 	return result, nil
 }
 
-func (repo *PostgresRepo) LoadOrder(ctx context.Context, order *entities.Order) error {
-	tx, err := repo.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func(tx *sql.Tx) {
-		err = tx.Rollback()
-		if err != nil {
-			return
-		}
-	}(tx)
-
+func (repo *PostgresRepo) LoadOrder(order *entities.Order) error {
 	query := `INSERT INTO orders(user_id, order_num, status, uploaded_at)
 				VALUES($1, $2, $3, now())`
 
-	_, err = tx.ExecContext(ctx, query, order.UserID, order.Number, order.Status)
+	_, err := repo.db.Exec(query, order.UserID, order.Number, order.Status)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code != pgerrcode.UniqueViolation {
 			return err
 		}
 
-		existOrder, err := repo.CheckOrder(ctx, order.Number)
+		existOrder, err := repo.CheckOrder(order.Number)
 		if err != nil {
 			repo.log.Errorf("checkOrder, error %s", err)
 			return err
@@ -172,10 +164,10 @@ func (repo *PostgresRepo) LoadOrder(ctx context.Context, order *entities.Order) 
 		return entities.ErrOrderAddedByOther
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-func (repo *PostgresRepo) CheckOrder(ctx context.Context, number string) (*entities.Order, error) {
+func (repo *PostgresRepo) CheckOrder(number string) (*entities.Order, error) {
 	query := `SELECT user_id, order_num, status, accrual, uploaded_at
 			 	 FROM orders 
 			 	 WHERE order_num = $1`
@@ -185,7 +177,7 @@ func (repo *PostgresRepo) CheckOrder(ctx context.Context, number string) (*entit
 		order   = &entities.Order{}
 	)
 
-	err := repo.db.QueryRowContext(ctx, query, number).Scan(
+	err := repo.db.QueryRow(query, number).Scan(
 		&order.UserID, &order.Number, &order.Status, &accrual, &order.UploadedAt,
 	)
 	if err != nil {
@@ -197,38 +189,26 @@ func (repo *PostgresRepo) CheckOrder(ctx context.Context, number string) (*entit
 	return order, nil
 }
 
-func (repo *PostgresRepo) UpdateOrder(ctx context.Context, order *entities.Order) error {
-	tx, err := repo.db.BeginTx(ctx, nil)
-	if err != nil {
-		return err
-	}
-
-	defer func(tx *sql.Tx) {
-		err = tx.Rollback()
-		if err != nil {
-			return
-		}
-	}(tx)
-
+func (repo *PostgresRepo) UpdateOrder(order *entities.Order) error {
 	query := `UPDATE orders
 		SET status = $1, accrual = $2
 		WHERE order_num = $3`
 
-	_, err = tx.ExecContext(ctx, query, order.Status, order.Accrual, order.Number)
+	_, err := repo.db.Exec(query, order.Status, order.Accrual, order.Number)
 	if err != nil {
 		return err
 	}
 
-	return tx.Commit()
+	return nil
 }
 
-func (repo *PostgresRepo) GetAllOrder(ctx context.Context) ([]entities.Order, error) {
+func (repo *PostgresRepo) GetNewAndProcessingOrder() ([]entities.Order, error) {
 	query := `SELECT user_id, order_num, status, uploaded_at
 		FROM orders 
 		WHERE status = 'NEW' OR status = 'PROCESSING'
 		ORDER BY uploaded_at ASC`
 
-	rows, err := repo.db.QueryContext(ctx, query)
+	rows, err := repo.db.Query(query)
 	if err != nil {
 		repo.log.Errorf("getAllOrder, error with query %s", err)
 		return nil, err
@@ -262,7 +242,7 @@ func (repo *PostgresRepo) GetAllOrder(ctx context.Context) ([]entities.Order, er
 	return orders, nil
 }
 
-func (repo *PostgresRepo) GetBalanceInfo(ctx context.Context, userID int64) ([]byte, error) {
+func (repo *PostgresRepo) GetBalanceInfo(userID int64) ([]byte, error) {
 	query := `SELECT b.balance, COALESCE(w.amount, 0)
 				FROM balance b
 				LEFT JOIN (SELECT user_id, SUM(amount) AS amount
@@ -272,7 +252,7 @@ func (repo *PostgresRepo) GetBalanceInfo(ctx context.Context, userID int64) ([]b
 
 	balance := entities.Balance{UserID: userID}
 
-	err := repo.db.QueryRowContext(ctx, query, userID).Scan(&balance.Current, &balance.Withdrawn)
+	err := repo.db.QueryRow(query, userID).Scan(&balance.Current, &balance.Withdrawn)
 	if err != nil {
 		repo.log.Errorf("getBalanceInfo, error with %s", err)
 		return nil, err
@@ -287,13 +267,13 @@ func (repo *PostgresRepo) GetBalanceInfo(ctx context.Context, userID int64) ([]b
 	return result, nil
 }
 
-func (repo *PostgresRepo) Withdraw(ctx context.Context, userID int64) ([]byte, error) {
+func (repo *PostgresRepo) Withdraw(userID int64) ([]byte, error) {
 	query := `SELECT order_num, amount, processed_at
 				FROM withdraw
 				WHERE user_id = $1
 				ORDER BY processed_at ASC`
 
-	rows, err := repo.db.QueryContext(ctx, query, userID)
+	rows, err := repo.db.Query(query, userID)
 	if err != nil {
 		return nil, err
 	}

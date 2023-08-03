@@ -1,12 +1,12 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"io"
 	"net/http"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
+	"github.com/alexlzrv/go-mart/internal/utils"
 )
 
 func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
@@ -17,20 +17,17 @@ func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	userID := h.getUserIDFromBody(w, r)
 
 	order := entities.NewOrder(userID, string(body))
 
-	err = h.db.LoadOrder(requestContext, order)
-	if err != nil {
-		if errors.Is(err, entities.ErrInvalidOrderNumber) {
-			w.WriteHeader(http.StatusUnprocessableEntity)
-			return
-		}
+	if ok := utils.LuhnCheck(order.Number); !ok {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
 
+	err = h.db.LoadOrder(order)
+	if err != nil {
 		if errors.Is(err, entities.ErrOrderAlreadyAdded) {
 			w.WriteHeader(http.StatusOK)
 			return
@@ -44,17 +41,14 @@ func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("content-type", "text/plain")
+	w.Header().Set("Content-type", "text/plain")
 	w.WriteHeader(http.StatusAccepted)
 }
 
 func (h *Handler) GetOrders(w http.ResponseWriter, r *http.Request) {
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	userID := h.getUserIDFromBody(w, r)
 
-	orders, err := h.db.GetUserOrders(requestContext, userID)
+	orders, err := h.db.GetUserOrders(userID)
 	if err != nil {
 		if errors.Is(err, entities.ErrNoData) {
 			h.log.Errorf("getOrders, no data")
@@ -69,7 +63,7 @@ func (h *Handler) GetOrders(w http.ResponseWriter, r *http.Request) {
 
 	h.log.Infof("getOrders, order received user %d orders %s", userID, string(orders))
 
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-type", "application/json")
 	_, err = w.Write(orders)
 	if err != nil {
 		h.log.Errorf("getOrders, cannot wrtie orders %s", string(orders))

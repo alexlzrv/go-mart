@@ -12,14 +12,19 @@ import (
 	"go.uber.org/zap"
 )
 
-func NewRoutes(db repository.Storage, log *zap.SugaredLogger) *chi.Mux {
-	handler := handlers.New(db, log)
+func NewRoutes(db repository.Storage, log *zap.SugaredLogger, key []byte) *chi.Mux {
+	handler := handlers.NewHandler(db, log, key)
+
 	r := chi.NewRouter()
+
+	mw := middleware.NewManager(key)
+
 	r.Route("/api/user/", func(r chi.Router) {
+		r.Use(middleware.CompressMiddleware)
 		auth.AuthRouters(r, handler)
 
 		r.Group(func(router chi.Router) {
-			router.Use(middleware.JWTAuth)
+			router.Use(mw.JWTAuth)
 			orders.Orders(router, handler)
 			balance.Balance(router, handler)
 			withdrawals.Withdrawals(router, handler)

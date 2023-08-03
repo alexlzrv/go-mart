@@ -1,7 +1,16 @@
 package main
 
-import apigomart "github.com/alexlzrv/go-mart/internal/api-go-mart"
+import (
+	"log"
+
+	apigomart "github.com/alexlzrv/go-mart/internal/api-go-mart"
+	"github.com/alexlzrv/go-mart/internal/config"
+)
 
 func main() {
-	apigomart.Run()
+	cfg, err := config.NewConfig()
+	if err != nil {
+		log.Fatal(err)
+	}
+	apigomart.Run(cfg)
 }

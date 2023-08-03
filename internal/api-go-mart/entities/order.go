@@ -10,18 +10,12 @@ const (
 	OrderStatusProcessing string = "PROCESSING"
 	OrderStatusInvalid    string = "INVALID"
 	OrderStatusProcessed  string = "PROCESSED"
-
-	AccrualStatusRegistered string = "REGISTERED"
-	AccrualStatusProcessing string = "PROCESSING"
-	AccrualStatusInvalid    string = "INVALID"
-	AccrualStatusProcessed  string = "PROCESSED"
 )
 
 var (
-	ErrInvalidOrderNumber = errors.New("invalid order number")
-	ErrOrderAlreadyAdded  = errors.New("order has already been added")
-	ErrOrderAddedByOther  = errors.New("order has already been added by another user")
-	ErrNoData             = errors.New("no data")
+	ErrOrderAlreadyAdded = errors.New("order has already been added")
+	ErrOrderAddedByOther = errors.New("order has already been added by another user")
+	ErrNoData            = errors.New("no data")
 )
 
 type Order struct {
@@ -38,15 +32,4 @@ func NewOrder(userID int64, number string) *Order {
 		Number: number,
 		Status: OrderStatusNew,
 	}
-}
-
-func AccrualToOrderStatus(status string) string {
-	mapping := map[string]string{
-		AccrualStatusRegistered: OrderStatusNew,
-		AccrualStatusProcessing: OrderStatusProcessing,
-		AccrualStatusInvalid:    OrderStatusInvalid,
-		AccrualStatusProcessed:  OrderStatusProcessed,
-	}
-
-	return mapping[status]
 }

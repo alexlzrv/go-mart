@@ -1,4 +1,4 @@
-package jwt
+package utils
 
 import (
 	"time"
@@ -15,9 +15,7 @@ const (
 	lifeTime = 1 * time.Hour
 )
 
-var key = []byte("secret")
-
-func GenerateToken(userID int64) (string, error) {
+func GenerateToken(userID int64, key []byte) (string, error) {
 	claims := &Claims{
 		UserID: userID,
 		RegisteredClaims: jwt.RegisteredClaims{
@@ -29,7 +27,7 @@ func GenerateToken(userID int64) (string, error) {
 	return token.SignedString(key)
 }
 
-func ParseToken(token string) (int64, error) {
+func ParseToken(token string, key []byte) (int64, error) {
 	claims := &Claims{}
 	_, err := jwt.ParseWithClaims(token, claims, func(token *jwt.Token) (interface{}, error) {
 		return key, nil

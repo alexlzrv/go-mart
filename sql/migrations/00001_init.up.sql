@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS orders(
                         id BIGINT GENERATED ALWAYS AS IDENTITY,
                         user_id BIGINT NOT NULL,
                         order_num TEXT NOT NULL UNIQUE,
-                        status TEXT,
+                        status TEXT NOT NULL,
                         accrual DOUBLE PRECISION,
                         uploaded_at TIMESTAMP WITH TIME ZONE NOT NULL,
                         PRIMARY KEY(id),
