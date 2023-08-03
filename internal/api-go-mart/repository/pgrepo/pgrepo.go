@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
 	postgres "github.com/alexlzrv/go-mart/sql"
@@ -247,7 +248,8 @@ func (repo *PostgresRepo) GetBalanceInfo(userID int64) ([]byte, error) {
 				FROM balance b
 				LEFT JOIN (SELECT user_id, SUM(amount) AS amount
 				    		FROM withdraw
-				    		GROUP BY user_id) w ON b.user_id = w.user_id
+				    		WHERE operation = 'withdrawal'
+				    		GROUP BY user_id, operation) w ON b.user_id = w.user_id
 				WHERE b.user_id = $1`
 
 	balance := entities.Balance{UserID: userID}
@@ -270,7 +272,7 @@ func (repo *PostgresRepo) GetBalanceInfo(userID int64) ([]byte, error) {
 func (repo *PostgresRepo) Withdraw(userID int64) ([]byte, error) {
 	query := `SELECT order_num, amount, processed_at
 				FROM withdraw
-				WHERE user_id = $1
+				WHERE user_id = $1 AND operation = 'withdrawal'
 				ORDER BY processed_at ASC`
 
 	rows, err := repo.db.Query(query, userID)
@@ -289,7 +291,8 @@ func (repo *PostgresRepo) Withdraw(userID int64) ([]byte, error) {
 
 	for rows.Next() {
 		withdrawal := entities.BalanceChange{
-			UserID: userID,
+			UserID:    userID,
+			Operation: entities.BalanceOperationWithdrawal,
 		}
 
 		err = rows.Scan(&withdrawal.Order, &withdrawal.Amount, &withdrawal.ProcessedAt)
@@ -313,13 +316,19 @@ func (repo *PostgresRepo) Withdraw(userID int64) ([]byte, error) {
 	return result, nil
 }
 
-func (repo *PostgresRepo) GetWithdrawals(ctx context.Context, change *entities.BalanceChange) error {
+func (repo *PostgresRepo) ChangeBalance(ctx context.Context, change *entities.BalanceChange) error {
 	queryBalance := `UPDATE balance
-				SET balance = balance - $1
+				SET balance = balance %s $1
 				WHERE user_id = $2`
 
-	queryWithdraw := `INSERT INTO withdraw(user_id, order_num, amount, processed_at)
-						VALUES ($1, $2, $3, now())`
+	queryWithdraw := `INSERT INTO withdraw(user_id, order_num, amount, operation, processed_at)
+						VALUES ($1, $2, $3, $4, now())`
+
+	if change.Operation == entities.BalanceOperationWithdrawal {
+		queryBalance = fmt.Sprintf(queryBalance, "-")
+	} else {
+		queryBalance = fmt.Sprintf(queryBalance, "+")
+	}
 
 	tx, err := repo.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -344,7 +353,7 @@ func (repo *PostgresRepo) GetWithdrawals(ctx context.Context, change *entities.B
 		return err
 	}
 
-	_, err = tx.ExecContext(ctx, queryWithdraw, change.UserID, change.Order, change.Amount)
+	_, err = tx.ExecContext(ctx, queryWithdraw, change.UserID, change.Order, change.Amount, change.Operation)
 	if err != nil {
 		repo.log.Errorf("getWithdrawals, error exec %s", err)
 		return err

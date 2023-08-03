@@ -1,46 +1,46 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 
 	j "github.com/alexlzrv/go-mart/internal/utils"
-	"github.com/golang-jwt/jwt/v4"
+	"go.uber.org/zap"
 )
 
 type Manager struct {
 	key []byte
+	log *zap.SugaredLogger
 }
 
-func NewManager(key []byte) *Manager {
+type key int
+
+const (
+	KeyPrincipalID key = iota
+)
+
+func NewManager(key []byte, log *zap.SugaredLogger) *Manager {
 	return &Manager{
 		key: key,
+		log: log,
 	}
 }
 
 func (mw *Manager) JWTAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		tokenHeader := r.Header.Get("Authorization")
-		if tokenHeader == "" {
+		jwt := r.Header.Get("Authorization")
+		if jwt == "" {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
-		claims := &j.Claims{}
 
-		token, err := jwt.ParseWithClaims(tokenHeader, claims, func(token *jwt.Token) (interface{}, error) {
-			return mw.key, nil
-		})
-
+		user, err := j.ParseToken(jwt, mw.key)
 		if err != nil {
 			w.WriteHeader(http.StatusUnauthorized)
 			return
 		}
 
-		if !token.Valid {
-			w.WriteHeader(http.StatusUnauthorized)
-			return
-		}
-
-		w.Header().Add("Authorization", tokenHeader)
+		r = r.WithContext(context.WithValue(r.Context(), KeyPrincipalID, user))
 
 		next.ServeHTTP(w, r)
 	})

@@ -5,10 +5,11 @@ import (
 	"net/http"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
+	"github.com/alexlzrv/go-mart/internal/api-go-mart/rest/middleware"
 )
 
 func (h *Handler) Withdrawals(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserIDFromBody(w, r)
+	userID := r.Context().Value(middleware.KeyPrincipalID).(int64)
 
 	withdrawals, err := h.db.Withdraw(userID)
 	if err != nil {

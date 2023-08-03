@@ -17,7 +17,7 @@ func NewRoutes(db repository.Storage, log *zap.SugaredLogger, key []byte) *chi.M
 
 	r := chi.NewRouter()
 
-	mw := middleware.NewManager(key)
+	mw := middleware.NewManager(key, log)
 
 	r.Route("/api/user/", func(r chi.Router) {
 		r.Use(middleware.CompressMiddleware)
