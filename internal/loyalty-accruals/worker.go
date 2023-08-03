@@ -3,24 +3,94 @@ package loyalty
 import (
 	"context"
 	"time"
+
+	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
+	"github.com/alexlzrv/go-mart/internal/api-go-mart/repository"
+	"go.uber.org/zap"
 )
 
-func (a *Accrual) OrderWorker(ctx context.Context) {
-	a.log.Info("Start order worker")
-	errorsCounter := 0
-	ticker := time.NewTicker(5 * time.Second)
+type Worker struct {
+	ordersChan chan *entities.Order
+	db         repository.Storage
+	accrual    Accrual
+	log        *zap.SugaredLogger
+}
+
+const lenChan = 10
+
+func NewWorker(db repository.Storage, accrual Accrual, log *zap.SugaredLogger) *Worker {
+	ordersChan := make(chan *entities.Order, lenChan)
+
+	w := &Worker{
+		ordersChan: ordersChan,
+		db:         db,
+		accrual:    accrual,
+		log:        log,
+	}
+
+	go w.orderWorker()
+
+	return w
+}
+
+func (w *Worker) orderWorker() {
+	w.log.Info("Start order worker")
+	ticker := time.NewTicker(lenChan * time.Second)
+	defer ticker.Stop()
+
+	for {
+		<-ticker.C
+		orders, err := w.db.GetNewAndProcessingOrder()
+		if err != nil {
+			w.log.Errorf("error with get processing orders %s", err)
+		}
+
+		for i := range orders {
+			w.ordersChan <- &orders[i]
+		}
+	}
+}
+
+func (w *Worker) Worker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			a.log.Info("Stop worker")
+			w.log.Info("Stopping order worker")
 			return
+		case order := <-w.ordersChan:
+			err := w.db.UpdateOrder(&entities.Order{Status: entities.OrderStatusProcessing, Number: order.Number})
+			if err != nil {
+				w.log.Errorf("errror with update orders info %s", err)
+				return
+			}
 
-		case <-ticker.C:
-			if err := a.updateOrdersInfo(); err != nil {
-				a.log.Errorf("updateOrdersInfo, error %s", err)
-				errorsCounter++
-				if errorsCounter > 10 {
-					a.log.Infof("Stopping actualize orders because of many errors")
+			orderInfo, err := w.accrual.GetActualInfo(order.Number)
+			if err != nil {
+				w.log.Errorf("error with get actual info %s", err)
+				return
+			}
+
+			if orderInfo.Status == entities.OrderStatusProcessed {
+				err = w.db.UpdateOrder(&entities.Order{
+					Number:  orderInfo.Order,
+					UserID:  order.UserID,
+					Accrual: orderInfo.Accrual,
+					Status:  orderInfo.Status,
+				})
+
+				if err != nil {
+					w.log.Errorf("errror with update orders infoo %s", err)
+					return
+				}
+
+				err = w.db.GetWithdrawals(ctx, &entities.BalanceChange{
+					UserID: order.UserID,
+					Order:  orderInfo.Order,
+					Amount: orderInfo.Accrual,
+				})
+
+				if err != nil {
+					w.log.Errorf("errror with get withdrawals %s", err)
 					return
 				}
 			}

@@ -8,14 +8,14 @@ import (
 
 type Storage interface {
 	Register(ctx context.Context, user *entities.User) error
-	Login(ctx context.Context, user *entities.User) error
+	Login(user *entities.User) error
 
-	GetUserOrders(ctx context.Context, userID int64) ([]byte, error)
-	LoadOrder(ctx context.Context, order *entities.Order) error
-	UpdateOrder(ctx context.Context, order *entities.Order) error
-	GetAllOrder(ctx context.Context) ([]entities.Order, error)
+	GetUserOrders(userID int64) ([]byte, error)
+	LoadOrder(order *entities.Order) error
+	UpdateOrder(order *entities.Order) error
+	GetNewAndProcessingOrder() ([]entities.Order, error)
 
-	GetBalanceInfo(ctx context.Context, userID int64) ([]byte, error)
-	Withdraw(ctx context.Context, userID int64) ([]byte, error)
+	GetBalanceInfo(userID int64) ([]byte, error)
+	Withdraw(userID int64) ([]byte, error)
 	GetWithdrawals(ctx context.Context, change *entities.BalanceChange) error
 }

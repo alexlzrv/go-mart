@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"errors"
 	"net/http"
 
@@ -9,12 +8,9 @@ import (
 )
 
 func (h *Handler) Withdrawals(w http.ResponseWriter, r *http.Request) {
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	userID := h.getUserIDFromBody(w, r)
 
-	withdrawals, err := h.db.Withdraw(requestContext, userID)
+	withdrawals, err := h.db.Withdraw(userID)
 	if err != nil {
 		if errors.Is(err, entities.ErrNoData) {
 			h.log.Errorf("withdrawals, no data")
@@ -26,7 +22,7 @@ func (h *Handler) Withdrawals(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-type", "application/json")
 
 	_, err = w.Write(withdrawals)
 	if err != nil {

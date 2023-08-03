@@ -3,13 +3,21 @@ package middleware
 import (
 	"net/http"
 
-	j "github.com/alexlzrv/go-mart/internal/utils/jwt"
+	j "github.com/alexlzrv/go-mart/internal/utils"
 	"github.com/golang-jwt/jwt/v4"
 )
 
-var key = []byte("secret")
+type Manager struct {
+	key []byte
+}
 
-func JWTAuth(next http.Handler) http.Handler {
+func NewManager(key []byte) *Manager {
+	return &Manager{
+		key: key,
+	}
+}
+
+func (mw *Manager) JWTAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		tokenHeader := r.Header.Get("Authorization")
 		if tokenHeader == "" {
@@ -19,7 +27,7 @@ func JWTAuth(next http.Handler) http.Handler {
 		claims := &j.Claims{}
 
 		token, err := jwt.ParseWithClaims(tokenHeader, claims, func(token *jwt.Token) (interface{}, error) {
-			return key, nil
+			return mw.key, nil
 		})
 
 		if err != nil {

@@ -20,12 +20,5 @@ func LogInitializer(level string) (*zap.SugaredLogger, error) {
 		return nil, fmt.Errorf("attempt to initialized logger failed - %v", err)
 	}
 
-	defer func(logger *zap.Logger) {
-		err = logger.Sync()
-		if err != nil {
-			return
-		}
-	}(logger)
-
 	return logger.Sugar(), nil
 }

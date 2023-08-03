@@ -1,19 +1,16 @@
 package handlers
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
+	"github.com/alexlzrv/go-mart/internal/utils"
 )
 
 func (h *Handler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	userID := h.getUserIDFromBody(w, r)
 
 	body, err := io.ReadAll(r.Body)
@@ -34,17 +31,15 @@ func (h *Handler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 
 	change.UserID = userID
 
-	err = h.db.GetWithdrawals(requestContext, &change)
+	if ok := utils.LuhnCheck(change.Order); !ok {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		return
+	}
+
+	err = h.db.GetWithdrawals(r.Context(), &change)
 	if err != nil {
 		if errors.Is(err, entities.ErrNegativeBalance) {
-			h.log.Errorf("negative balance")
 			w.WriteHeader(http.StatusPaymentRequired)
-			return
-		}
-
-		if errors.Is(err, entities.ErrInvalidOrderNumber) {
-			h.log.Errorf("invalid order number")
-			w.WriteHeader(http.StatusUnprocessableEntity)
 			return
 		}
 
@@ -53,24 +48,21 @@ func (h *Handler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-type", "application/json")
 	w.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) GetBalance(w http.ResponseWriter, r *http.Request) {
-	requestContext, requestCancel := context.WithTimeout(r.Context(), requestTimeout)
-	defer requestCancel()
-
 	userID := h.getUserIDFromBody(w, r)
 
-	balance, err := h.db.GetBalanceInfo(requestContext, userID)
+	balance, err := h.db.GetBalanceInfo(userID)
 	if err != nil {
 		h.log.Errorf("getBalanceInfo, error %s", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("content-type", "application/json")
+	w.Header().Set("Content-type", "application/json")
 	_, err = w.Write(balance)
 	if err != nil {
 		h.log.Errorf("getBalanceInfo, cannot wrtie orders %s", string(balance))

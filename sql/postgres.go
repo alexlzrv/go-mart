@@ -19,16 +19,14 @@ type Postgres struct {
 	*sql.DB
 }
 
-func NewPostgresStorage(dsn string, log *zap.SugaredLogger) (*Postgres, error) {
+func NewStorage(dsn string, log *zap.SugaredLogger) (*Postgres, error) {
 	err := runMigrations(dsn, log)
 	if err != nil {
-		log.Errorf("attempt to establish connection failed: %s", err)
 		return nil, err
 	}
 
 	db, err := newDBSession(dsn, log)
 	if err != nil {
-		log.Errorf("during initializing of new db session, error occurred: %s", err)
 		return nil, err
 	}
 
