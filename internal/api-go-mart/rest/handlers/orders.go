@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
+	"github.com/alexlzrv/go-mart/internal/api-go-mart/rest/middleware"
 	"github.com/alexlzrv/go-mart/internal/utils"
 )
 
@@ -17,7 +18,7 @@ func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserIDFromBody(w, r)
+	userID := r.Context().Value(middleware.KeyPrincipalID).(int64)
 
 	order := entities.NewOrder(userID, string(body))
 
@@ -46,7 +47,7 @@ func (h *Handler) LoadOrders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetOrders(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserIDFromBody(w, r)
+	userID := r.Context().Value(middleware.KeyPrincipalID).(int64)
 
 	orders, err := h.db.GetUserOrders(userID)
 	if err != nil {

@@ -7,11 +7,12 @@ import (
 	"net/http"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
+	"github.com/alexlzrv/go-mart/internal/api-go-mart/rest/middleware"
 	"github.com/alexlzrv/go-mart/internal/utils"
 )
 
-func (h *Handler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserIDFromBody(w, r)
+func (h *Handler) ChangeBalance(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(middleware.KeyPrincipalID).(int64)
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -28,15 +29,17 @@ func (h *Handler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusBadRequest)
 		return
 	}
+	h.log.Infof("changeBalance request body %v", change)
 
 	change.UserID = userID
+	change.Operation = entities.BalanceOperationWithdrawal
 
 	if ok := utils.LuhnCheck(change.Order); !ok {
 		w.WriteHeader(http.StatusUnprocessableEntity)
 		return
 	}
 
-	err = h.db.GetWithdrawals(r.Context(), &change)
+	err = h.db.ChangeBalance(r.Context(), &change)
 	if err != nil {
 		if errors.Is(err, entities.ErrNegativeBalance) {
 			w.WriteHeader(http.StatusPaymentRequired)
@@ -53,7 +56,7 @@ func (h *Handler) GetWithdrawals(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetBalance(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserIDFromBody(w, r)
+	userID := r.Context().Value(middleware.KeyPrincipalID).(int64)
 
 	balance, err := h.db.GetBalanceInfo(userID)
 	if err != nil {
@@ -61,6 +64,8 @@ func (h *Handler) GetBalance(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
+
+	h.log.Infof("getBalance request body %s", string(balance))
 
 	w.Header().Set("Content-type", "application/json")
 	_, err = w.Write(balance)

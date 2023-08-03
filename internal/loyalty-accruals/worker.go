@@ -65,6 +65,10 @@ func (w *Worker) Worker(ctx context.Context) {
 			}
 
 			orderInfo, err := w.accrual.GetActualInfo(order.Number)
+
+			//проверить тип ошибки ретрай афтер
+
+			//errGroup
 			if err != nil {
 				w.log.Errorf("error with get actual info %s", err)
 				return
@@ -83,10 +87,11 @@ func (w *Worker) Worker(ctx context.Context) {
 					return
 				}
 
-				err = w.db.GetWithdrawals(ctx, &entities.BalanceChange{
-					UserID: order.UserID,
-					Order:  orderInfo.Order,
-					Amount: orderInfo.Accrual,
+				err = w.db.ChangeBalance(ctx, &entities.BalanceChange{
+					UserID:    order.UserID,
+					Order:     orderInfo.Order,
+					Operation: entities.BalanceOperationRefill,
+					Amount:    orderInfo.Accrual,
 				})
 
 				if err != nil {
