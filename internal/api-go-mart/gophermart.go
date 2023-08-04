@@ -57,11 +57,11 @@ func Run(cfg *config.Config) {
 	}()
 
 	loyaltyAccrual := loyalty.NewAccrual(cfg.AccrualAddress, repo, log)
-	worker := loyalty.NewWorker(repo, loyaltyAccrual, log)
+	worker := loyalty.NewWorker(repo, loyaltyAccrual, cfg.WorkersCount, log)
 
 	wg.Add(1)
 	go func() {
-		worker.Worker(ctx)
+		worker.Run(ctx)
 	}()
 
 	componentsErrs := make(chan error, 1)

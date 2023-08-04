@@ -13,6 +13,7 @@ require (
 	github.com/sirupsen/logrus v1.9.2
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.11.0
+	golang.org/x/sync v0.2.0
 )
 
 require (

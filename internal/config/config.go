@@ -15,6 +15,7 @@ type Config struct {
 	LogLevel          string        `env:"LOG_LEVEL"`
 	SecretKey         string        `env:"JWT_SECRET"`
 	RepositoryTimeout time.Duration `env:"REPOSITORY_TIMEOUT"`
+	WorkersCount      int           `env:"WORKERS_COUNT"`
 }
 
 const (
@@ -24,6 +25,7 @@ const (
 	logLevelDefault          = "info"
 	secretKeyDefault         = "secret"
 	repositoryTimeoutDefault = 5 * time.Second
+	workersCountDefault      = 20
 )
 
 func NewConfig() (*Config, error) {
@@ -45,5 +47,6 @@ func (c *Config) init() {
 	flag.StringVar(&c.LogLevel, "l", logLevelDefault, "Log level")
 	flag.StringVar(&c.SecretKey, "s", secretKeyDefault, "Authorization token encryption key")
 	flag.DurationVar(&c.RepositoryTimeout, "t", repositoryTimeoutDefault, "repository timeout")
+	flag.IntVar(&c.WorkersCount, "w", workersCountDefault, "workers count")
 	flag.Parse()
 }

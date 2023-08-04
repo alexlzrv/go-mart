@@ -2,76 +2,103 @@ package loyalty
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/entities"
 	"github.com/alexlzrv/go-mart/internal/api-go-mart/repository"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 )
 
 type Worker struct {
-	ordersChan chan *entities.Order
-	db         repository.Storage
-	accrual    Accrual
-	log        *zap.SugaredLogger
+	db      repository.Storage
+	accrual Accrual
+	log     *zap.SugaredLogger
+	workers int
 }
 
-const lenChan = 10
-
-func NewWorker(db repository.Storage, accrual Accrual, log *zap.SugaredLogger) *Worker {
-	ordersChan := make(chan *entities.Order, lenChan)
-
-	w := &Worker{
-		ordersChan: ordersChan,
-		db:         db,
-		accrual:    accrual,
-		log:        log,
+func NewWorker(db repository.Storage, accrual Accrual, workersCount int, log *zap.SugaredLogger) *Worker {
+	return &Worker{
+		db:      db,
+		workers: workersCount,
+		accrual: accrual,
+		log:     log,
 	}
-
-	go w.orderWorker()
-
-	return w
 }
 
-func (w *Worker) orderWorker() {
+func (w *Worker) Run(ctx context.Context) {
 	w.log.Info("Start order worker")
-	ticker := time.NewTicker(lenChan * time.Second)
-	defer ticker.Stop()
-
 	for {
-		<-ticker.C
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		orders, err := w.db.GetNewAndProcessingOrder()
 		if err != nil {
 			w.log.Errorf("error with get processing orders %s", err)
 		}
 
-		for i := range orders {
-			w.ordersChan <- &orders[i]
+		task := w.generateOrderTask(ctx, orders)
+
+		gr, grCtx := errgroup.WithContext(context.Background())
+
+		for i := 0; i < w.workers; i++ {
+			gr.Go(func() error {
+				return w.orderTaskWorker(grCtx, task)
+			})
+		}
+
+		if err = gr.Wait(); err != nil {
+			var accrualErr *AccrualCoolDownError
+			if errors.As(err, &accrualErr) {
+				time.Sleep(accrualErr.CoolDown)
+				continue
+			} else {
+				w.log.Errorf("workers run with error %s", err)
+			}
 		}
 	}
 }
 
-func (w *Worker) Worker(ctx context.Context) {
-	for {
+func (w *Worker) generateOrderTask(ctx context.Context, orders []entities.Order) chan entities.Order {
+	ordersChan := make(chan entities.Order, w.workers)
+
+	go func() {
+		defer close(ordersChan)
+
+		for i := range orders {
+			select {
+			case <-ctx.Done():
+				return
+			case ordersChan <- orders[i]:
+			}
+		}
+	}()
+
+	return ordersChan
+}
+
+func (w *Worker) orderTaskWorker(ctx context.Context, task <-chan entities.Order) error {
+	for order := range task {
 		select {
 		case <-ctx.Done():
-			w.log.Info("Stopping order worker")
-			return
-		case order := <-w.ordersChan:
+			return nil
+		default:
 			err := w.db.UpdateOrder(&entities.Order{Status: entities.OrderStatusProcessing, Number: order.Number})
 			if err != nil {
 				w.log.Errorf("errror with update orders info %s", err)
-				return
+				return err
 			}
 
 			orderInfo, err := w.accrual.GetActualInfo(order.Number)
-
-			//проверить тип ошибки ретрай афтер
-
-			//errGroup
 			if err != nil {
-				w.log.Errorf("error with get actual info %s", err)
-				return
+				if errors.Is(err, ErrAccrualOrderNotFound) {
+					continue
+				}
+				return err
 			}
 
 			if orderInfo.Status == entities.OrderStatusProcessed {
@@ -84,7 +111,7 @@ func (w *Worker) Worker(ctx context.Context) {
 
 				if err != nil {
 					w.log.Errorf("errror with update orders infoo %s", err)
-					return
+					return err
 				}
 
 				err = w.db.ChangeBalance(ctx, &entities.BalanceChange{
@@ -96,9 +123,11 @@ func (w *Worker) Worker(ctx context.Context) {
 
 				if err != nil {
 					w.log.Errorf("errror with get withdrawals %s", err)
-					return
+					return err
 				}
 			}
 		}
 	}
+
+	return nil
 }

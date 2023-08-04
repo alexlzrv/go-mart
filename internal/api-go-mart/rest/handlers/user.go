@@ -26,6 +26,13 @@ func (h *Handler) Registration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	err = user.GenerateCryptPassword()
+	if err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		h.log.Errorf("error with generate crypt password user: %s", err)
+		return
+	}
+
 	if err = h.db.Register(r.Context(), &user); err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		h.log.Errorf("error with register user: %s", err)
