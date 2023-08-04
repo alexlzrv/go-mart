@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5/pgconn"
 	"go.uber.org/zap"
-	"golang.org/x/crypto/bcrypt"
 )
 
 type PostgresRepo struct {
@@ -40,14 +39,6 @@ func (repo *PostgresRepo) Register(ctx context.Context, user *entities.User) err
 			return
 		}
 	}(tx)
-
-	cryptPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
-	if err != nil {
-		repo.log.Errorf("this password is not allowed: %s", err)
-		return err
-	}
-
-	user.CryptPassword = cryptPassword
 
 	var id int64
 
