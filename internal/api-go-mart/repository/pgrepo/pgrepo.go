@@ -352,3 +352,27 @@ func (repo *PostgresRepo) ChangeBalance(ctx context.Context, change *entities.Ba
 
 	return tx.Commit()
 }
+
+func (repo *PostgresRepo) UpdateOrderAndChangeBalance(ctx context.Context, order *entities.Order, change *entities.BalanceChange) error {
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func(tx *sql.Tx) {
+		err = tx.Rollback()
+		if err != nil {
+			return
+		}
+	}(tx)
+
+	if err = repo.UpdateOrder(order); err != nil {
+		return err
+	}
+
+	if err = repo.ChangeBalance(ctx, change); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}

@@ -87,12 +87,6 @@ func (w *Worker) orderTaskWorker(ctx context.Context, task <-chan entities.Order
 		case <-ctx.Done():
 			return nil
 		default:
-			err := w.db.UpdateOrder(&entities.Order{Status: entities.OrderStatusProcessing, Number: order.Number})
-			if err != nil {
-				w.log.Errorf("errror with update orders info %s", err)
-				return err
-			}
-
 			orderInfo, err := w.accrual.GetActualInfo(order.Number)
 			if err != nil {
 				if errors.Is(err, ErrAccrualOrderNotFound) {
@@ -102,24 +96,17 @@ func (w *Worker) orderTaskWorker(ctx context.Context, task <-chan entities.Order
 			}
 
 			if orderInfo.Status == entities.OrderStatusProcessed {
-				err = w.db.UpdateOrder(&entities.Order{
-					Number:  orderInfo.Order,
-					UserID:  order.UserID,
-					Accrual: orderInfo.Accrual,
-					Status:  orderInfo.Status,
-				})
-
-				if err != nil {
-					w.log.Errorf("errror with update orders infoo %s", err)
-					return err
-				}
-
-				err = w.db.ChangeBalance(ctx, &entities.BalanceChange{
-					UserID:    order.UserID,
-					Order:     orderInfo.Order,
-					Operation: entities.BalanceOperationRefill,
-					Amount:    orderInfo.Accrual,
-				})
+				err = w.db.UpdateOrderAndChangeBalance(ctx,
+					&entities.Order{
+						Number:  orderInfo.Order,
+						UserID:  order.UserID,
+						Accrual: orderInfo.Accrual,
+						Status:  orderInfo.Status},
+					&entities.BalanceChange{
+						UserID:    order.UserID,
+						Order:     orderInfo.Order,
+						Operation: entities.BalanceOperationRefill,
+						Amount:    orderInfo.Accrual})
 
 				if err != nil {
 					w.log.Errorf("errror with get withdrawals %s", err)

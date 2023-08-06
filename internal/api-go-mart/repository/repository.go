@@ -18,4 +18,5 @@ type Storage interface {
 	GetBalanceInfo(userID int64) ([]byte, error)
 	Withdraw(userID int64) ([]byte, error)
 	ChangeBalance(ctx context.Context, change *entities.BalanceChange) error
+	UpdateOrderAndChangeBalance(ctx context.Context, order *entities.Order, change *entities.BalanceChange) error
 }
